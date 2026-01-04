@@ -5,3 +5,5 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - ./sa-key.json:/app/sa-key.json:ro
