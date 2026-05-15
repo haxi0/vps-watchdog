@@ -9,11 +9,12 @@ This service periodically checks the availability of a VPS via ICMP (ping) and a
 ## Overview
 
 - 🔄 Automatic VM start on failure  
-- 📡 Availability check via ping  
-- 🔐 Authentication via service account  
+- �️ **Monitor multiple VMs at once**, including VMs spread across **different Yandex Cloud organizations / clouds / folders** (each with its own service account)  
+- � Availability check via ping  
+- 🔐 Authentication via service account, with per-key IAM token caching  
 - ♻️ Automatic IAM token refresh  
 - 🐳 Runs in Docker / docker-compose  
-- ⚙️ All parameters configurable via `.env`  
+- ⚙️ Single-VM mode via `.env`, multi-VM mode via JSON config  
 - 🧠 Minimal dependencies, no cron or systemd required  
 
 ---
@@ -113,6 +114,101 @@ This service periodically checks the availability of a VPS via ICMP (ping) and a
    ├── docker-compose.yml
    └── ...
    ```
+
+---
+
+## Multi-VM mode (across organizations)
+
+If you want to monitor several VMs, or your VMs live in **different Yandex Cloud organizations / clouds / folders**, use a JSON config. Create a separate service account and key in each organization, and reference the right key per VM in the config.
+
+### 1. Create one service account per organization
+
+In each organization (e.g. `organization-haxi0` and `work`), follow the same `yc` setup steps as for the single-VM mode, switching profiles with `yc config profile activate <profile>`. You will end up with several key files:
+
+```
+keys/
+├── haxi0-sa-key.json
+└── work-sa-key.json
+```
+
+### 2. Create `config.json`
+
+Copy `config.example.json` and describe your VMs:
+
+```json
+{
+  "check_interval": 30,
+  "ping_attempts": 3,
+  "ping_timeout": 1,
+  "targets": [
+    {
+      "name": "haxi0-main",
+      "host": "1.2.3.4",
+      "instance_id": "fhmxxxxxxxxxxxxxxxxx",
+      "sa_key_path": "/app/keys/haxi0-sa-key.json"
+    },
+    {
+      "name": "work-vm-1",
+      "host": "5.6.7.8",
+      "instance_id": "epdxxxxxxxxxxxxxxxxx",
+      "sa_key_path": "/app/keys/work-sa-key.json"
+    },
+    {
+      "name": "work-vm-2",
+      "host": "9.10.11.12",
+      "instance_id": "epdyyyyyyyyyyyyyyyyy",
+      "sa_key_path": "/app/keys/work-sa-key.json",
+      "check_interval": 60
+    }
+  ]
+}
+```
+
+Top-level `check_interval`, `ping_attempts`, `ping_timeout` are defaults for every target and can be overridden per target. Required target fields: `name`, `host`, `instance_id`. `sa_key_path` is required whenever you mix multiple keys; if all VMs share one key, you may set `sa_key_path` only at the top level.
+
+### 3. Enable the mode in `.env`
+
+```
+WATCHDOG_CONFIG=/app/config.json
+```
+
+When set, this variable takes precedence over `VM_HOST` / `INSTANCE_ID` (which are ignored in multi-VM mode).
+
+### 4. Mount the config and keys into the container
+
+Uncomment the relevant lines in `docker-compose.yml`:
+
+```yaml
+services:
+  vps-watchdog:
+    build: .
+    container_name: vps-watchdog
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./keys:/app/keys:ro
+```
+
+Project layout in this mode:
+
+```
+vps-watchdog/
+├── config.json
+├── keys/
+│   ├── haxi0-sa-key.json
+│   └── work-sa-key.json
+├── docker-compose.yml
+├── .env
+└── ...
+```
+
+### How it works
+
+- Each target runs in its own thread, so a slow ping on one VM does not block checks on the others.
+- IAM tokens are cached per service account key, so VMs from different organizations work in parallel correctly.
+- Every log line is prefixed with the target name in square brackets, e.g. `[work-vm-1] Server is alive`.
 
 ---
 

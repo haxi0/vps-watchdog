@@ -1,0 +1,26 @@
+{
+  "check_interval": 30,
+  "ping_attempts": 3,
+  "ping_timeout": 1,
+  "targets": [
+    {
+      "name": "haxi0-main",
+      "host": "1.2.3.4",
+      "instance_id": "fhmxxxxxxxxxxxxxxxxx",
+      "sa_key_path": "/app/keys/haxi0-sa-key.json"
+    },
+    {
+      "name": "work-vm-1",
+      "host": "5.6.7.8",
+      "instance_id": "epdxxxxxxxxxxxxxxxxx",
+      "sa_key_path": "/app/keys/work-sa-key.json"
+    },
+    {
+      "name": "work-vm-2",
+      "host": "9.10.11.12",
+      "instance_id": "epdyyyyyyyyyyyyyyyyy",
+      "sa_key_path": "/app/keys/work-sa-key.json",
+      "check_interval": 60
+    }
+  ]
+}

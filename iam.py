@@ -1,33 +1,28 @@
 import json
+import os
+import threading
 import time
+
 import jwt
 import requests
-import os
 
 IAM_URL = "https://iam.api.cloud.yandex.net/iam/v1/tokens"
 
-# Cached IAM token and its expiration time (unix timestamp)
-_cached_token = None
-_cached_exp = 0
+# Per-key cache: maps absolute sa_key_path -> {"token": str, "exp": int}.
+# A lock guards the cache against concurrent access from multiple watchdog threads.
+_token_cache: dict = {}
+_cache_lock = threading.Lock()
 
-def get_iam_token(sa_key_path: str) -> str:
+
+def _request_token(sa_key_path: str) -> tuple:
+    """Request a fresh IAM token for the given service account key.
+
+    Returns a tuple of (token, exp_unix_timestamp).
     """
-    Get IAM token using service account key.
-    Uses caching to avoid unnecessary token requests.
-    """
-    global _cached_token, _cached_exp
-
-    if not os.path.exists(sa_key_path):
-        raise FileNotFoundError(f"Service account key file not found: {sa_key_path}")
-
-    now = int(time.time())
-    # Return cached token if still valid (with 60 seconds buffer)
-    if _cached_token and now < _cached_exp - 60:
-        return _cached_token
-
     with open(sa_key_path, "r") as f:
         key = json.load(f)
 
+    now = int(time.time())
     payload = {
         "aud": IAM_URL,
         "iss": key["service_account_id"],
@@ -46,8 +41,28 @@ def get_iam_token(sa_key_path: str) -> str:
     r.raise_for_status()
 
     data = r.json()
-    _cached_token = data["iamToken"]
-    # Cache expiration time is set to 12 hours from now (unix timestamp)
-    _cached_exp = now + 12 * 3600
+    # Yandex Cloud IAM tokens are valid for up to 12 hours.
+    return data["iamToken"], now + 12 * 3600
 
-    return _cached_token
+
+def get_iam_token(sa_key_path: str) -> str:
+    """Get an IAM token for the given service account key.
+
+    Caches the token per key path to avoid unnecessary token requests when
+    multiple watchdog targets share the same service account.
+    """
+    if not os.path.exists(sa_key_path):
+        raise FileNotFoundError(f"Service account key file not found: {sa_key_path}")
+
+    cache_key = os.path.abspath(sa_key_path)
+    now = int(time.time())
+
+    with _cache_lock:
+        entry = _token_cache.get(cache_key)
+        # Return cached token if still valid (with 60 seconds buffer).
+        if entry and now < entry["exp"] - 60:
+            return entry["token"]
+
+        token, exp = _request_token(sa_key_path)
+        _token_cache[cache_key] = {"token": token, "exp": exp}
+        return token

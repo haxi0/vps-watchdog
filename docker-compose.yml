@@ -6,4 +6,8 @@ services:
     env_file:
       - .env
     volumes:
+      # Single-VM mode: mount one service account key.
       - ./sa-key.json:/app/sa-key.json:ro
+      # Multi-VM mode: uncomment and mount your JSON config and keys directory.
+      # - ./config.json:/app/config.json:ro
+      # - ./keys:/app/keys:ro
